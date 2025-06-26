@@ -1,15 +1,4 @@
-0. dlib 라이브러리 빌드
-
-git clone https://github.com/davisking/dlib.git
-cd dlib
-mkdir build
-cd build
-cmake -DCMAKE_BUILD_TYPE=Release ..
-cmake --build .
-
-******************************************************************************************************
-
-1. 라즈베리파이에서 레거시 V4L2 카메라 모드 활성화하기
+0. 라즈베리파이에서 레거시 V4L2 카메라 모드 활성화하기
    - 최신 Raspbery Pi OS(Bullseye 이후)는 libcamera 기반 스택이 기본 카메라 처리 방식이다.
    - 최신 기능 여러가지 사용 가능하지만, 이 libcamera 를 opencv 내에서 사용하려면 복잡한게 상당히 많다.
    - 따라서 레거시 모드 활성화 하여 /dev/video0 를 사용하는 방식이 편하다.
@@ -27,5 +16,16 @@ sudo modprobe bcm2835-v4l2
 /etc/modules 마지막줄에 bcm2835-v4l2 추가하면 부팅시 자동 로드된다.
 
 ffplay /dev/video0 으로 영상 출력 확인할 수 있다.
+
+******************************************************************************************************
+
+1. dlib 라이브러리 빌드
+
+git clone https://github.com/davisking/dlib.git
+cd dlib
+mkdir build
+cd build
+cmake -DCMAKE_BUILD_TYPE=Release ..
+cmake --build .
 
 ******************************************************************************************************
