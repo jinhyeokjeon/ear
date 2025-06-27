@@ -120,10 +120,7 @@ int main() {
 
       // 눈 감김 비율이 임계치 넘을 시 경고
       if (ratio >= BLINK_RATIO_THRESH) {
-        cv::putText(frame, "Eyes Closed TOO LONG!",
-          cv::Point(faceRect.left(), faceRect.top() - 40),
-          cv::FONT_HERSHEY_SIMPLEX, 0.9,
-          cv::Scalar(0, 0, 255), 2);
+        cv::putText(frame, "SLEEPING !!!!", cv::Point(faceRect.left(), faceRect.top() - 40), cv::FONT_HERSHEY_SIMPLEX, 0.9, cv::Scalar(0, 0, 255), 2);
       }
 
       // 2초간의 윈도우 초과한 항목 제거
