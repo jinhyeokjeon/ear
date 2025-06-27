@@ -8,11 +8,15 @@
 #include <thread>
 #include <mutex>
 #include <atomic>
+#include <deque>
+#include <utility>
 #include "functions.h"
 
 // ---------- 전역 상수 ----------
 constexpr int    UPDATE_MS = 100;     // 얼굴 검출 주기 (ms 단위)
-constexpr double EAR_THRESH = 0.20; // EAR 임계값
+constexpr double EAR_THRESH = 0.30; // EAR 임계값
+constexpr double BLINK_RATIO_THRESH = 0.6; // 감은 비율 임계값
+constexpr int BLINK_WINDOW_MS = 2000; // 분석 시간 윈도우 (2초)
 // -------------------------------
 
 // 얼굴 검출용 백그라운드 스레드 함수 선언
@@ -37,7 +41,7 @@ int main() {
   dlib::shape_predictor sp;
   dlib::deserialize("../eye_data/shape_predictor_68_face_landmarks.dat") >> sp;
 
-  // 공유 변수
+  // -------- 공유 변수 ---------
   dlib::rectangle biggestFaceRect;
   bool hasFace = false;
   std::mutex faceMutex;
@@ -46,6 +50,7 @@ int main() {
   std::mutex frameMutex;
 
   std::atomic<bool> running = true;
+  // -----------------------------
 
   // 백그라운드 얼굴 탐지 스레드 시작
   std::thread faceThread(runFaceDetectionThread,
@@ -56,9 +61,14 @@ int main() {
     std::ref(hasFace),
     std::ref(faceMutex)
   );
+  // --------------------------------
 
   cv::namedWindow("Window");
   unsigned int frameCount = 0;
+
+  // 눈 감음 정보
+  std::deque<std::pair<std::chrono::steady_clock::time_point, bool>> blinkHistory;
+  unsigned long long closedCount = 0;
 
   while (true) {
     auto t0 = std::chrono::high_resolution_clock::now();
@@ -101,7 +111,30 @@ int main() {
         cv::circle(frame, cv::Point(p.x(), p.y()), 2, cv::Scalar(255, 0, 0), -1);
       }
 
-      if (earAvg < EAR_THRESH) {
+      bool isClosed = (earAvg < EAR_THRESH);
+      if (isClosed) ++closedCount;
+
+      // 현재 시간 기록
+      auto now = std::chrono::steady_clock::now();
+      blinkHistory.emplace_back(now, isClosed);
+
+      // 눈 감김 비율 계산
+      double ratio = static_cast<double>(closedCount) / blinkHistory.size();
+      std::cout << "Eye closed ratio: " << ratio << std::endl;
+      if (ratio >= BLINK_RATIO_THRESH) {
+        cv::putText(frame, "Eyes Closed TOO LONG!",
+          cv::Point(faceRect.left(), faceRect.top() - 40),
+          cv::FONT_HERSHEY_SIMPLEX, 0.9,
+          cv::Scalar(0, 0, 255), 2);
+      }
+
+      // 2초 윈도우 초과한 항목 제거
+      while (!blinkHistory.empty() && std::chrono::duration_cast<std::chrono::milliseconds>(now - blinkHistory.front().first).count() > BLINK_WINDOW_MS) {
+        if (blinkHistory.front().second) --closedCount;
+        blinkHistory.pop_front();
+      }
+
+      if (isClosed) {
         cv::putText(frame, "Eye Closed!!!!",
           cv::Point(faceRect.left(), faceRect.top() - 10),
           cv::FONT_HERSHEY_SIMPLEX, 0.9,
