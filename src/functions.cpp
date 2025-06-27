@@ -1,5 +1,7 @@
-#include "functions.h"
+#include <wiringPi.h>
+#include <softTone.h>
 #include <cmath>
+#include "functions.h"
 
 double computeEAR(const dlib::full_object_detection& s, int idx) {
   auto dist = [](const dlib::point& a, const dlib::point& b) {
@@ -44,4 +46,39 @@ void runFaceDetectionThread(std::atomic<bool>& running, cv::Mat& sharedFrame, st
 
     // std::this_thread::sleep_for(std::chrono::milliseconds(UPDATE_MS));
   }
+}
+void runMusicThread(std::atomic<bool>& running, std::atomic<bool>& sleeping) {
+  constexpr int SPKR = 6;
+  softToneCreate(SPKR);
+
+  while (running) {
+    if (sleeping) {
+      softToneWrite(SPKR, 391);
+      std::this_thread::sleep_for(std::chrono::milliseconds(280));
+    }
+    else {
+      softToneWrite(SPKR, 0);
+      std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+  }
+
+  softToneWrite(SPKR, 0);
+}
+void runLedBlinkingThread(std::atomic<bool>& running, std::atomic<bool>& sleeping, int gpioPin) {
+  pinMode(gpioPin, OUTPUT);
+
+  while (running) {
+    if (sleeping) {
+      digitalWrite(gpioPin, HIGH);
+      std::this_thread::sleep_for(std::chrono::milliseconds(100));
+      digitalWrite(gpioPin, LOW);
+      std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+    else {
+      digitalWrite(gpioPin, LOW);
+      std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+  }
+
+  digitalWrite(gpioPin, LOW); // turn off LED on exit
 }

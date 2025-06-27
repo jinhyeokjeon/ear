@@ -25,4 +25,4 @@ add_executable(main
  src/functions.cpp
  )
 
-target_link_libraries(main ${OpenCV_LIBS} dlib)
+target_link_libraries(main ${OpenCV_LIBS} dlib wiringPi)

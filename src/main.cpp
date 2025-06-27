@@ -10,6 +10,7 @@
 #include <atomic>
 #include <deque>
 #include <utility>
+#include <wiringPi.h>
 #include "functions.h"
 
 // ------------------------- 전역 상수 -------------------------
@@ -27,6 +28,9 @@ int main() {
     return -1;
   }
 
+  // wiringPi 초기화
+  wiringPiSetup();
+
   // dlib 모델 불러오기
   dlib::shape_predictor sp;
   dlib::deserialize("../eye_data/shape_predictor_68_face_landmarks.dat") >> sp;
@@ -40,6 +44,7 @@ int main() {
   std::mutex faceMutex; // 위 두 변수 동기화 뮤텍스
   cv::Mat sharedFrame; // 쓰레드에게 전달할 프레임
   std::mutex frameMutex; // 위 변수 동기화 뮤텍스
+  std::atomic<bool> sleeping = false; // 졸음 여부 저장 변수
   std::atomic<bool> running = true; // 프로그램 동작 여부 변수 (쓰레드 제어용)
 
   // 눈 감음 정보 저장 변수
@@ -48,6 +53,10 @@ int main() {
 
   // 얼굴 탐지 스레드 시작
   std::thread faceThread(runFaceDetectionThread, std::ref(running), std::ref(sharedFrame), std::ref(frameMutex), std::ref(biggestFaceRect), std::ref(hasFace), std::ref(faceMutex));
+
+  // LED, 부저 울림 스레드 시작
+  std::thread ledThread(runLedBlinkingThread, std::ref(running), std::ref(sleeping), 1);
+  std::thread musicThread(runMusicThread, std::ref(running), std::ref(sleeping));
 
   while (true) {
     // FPS 계산 위한 시간값 저장
@@ -120,10 +129,11 @@ int main() {
 
       // 눈 감김 비율이 임계치 넘을 시 경고
       if (ratio >= BLINK_RATIO_THRESH) {
-        cv::putText(frame, "Eyes Closed TOO LONG!",
-          cv::Point(faceRect.left(), faceRect.top() - 40),
-          cv::FONT_HERSHEY_SIMPLEX, 0.9,
-          cv::Scalar(0, 0, 255), 2);
+        cv::putText(frame, "SLEEPING ! ! !", cv::Point(faceRect.left(), faceRect.top() - 40), cv::FONT_HERSHEY_SIMPLEX, 0.9, cv::Scalar(0, 0, 255), 2);
+        sleeping = true;
+      }
+      else {
+        sleeping = false;
       }
 
       // 2초간의 윈도우 초과한 항목 제거
