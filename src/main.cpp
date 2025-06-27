@@ -12,72 +12,52 @@
 #include <utility>
 #include "functions.h"
 
-// ---------- 전역 상수 ----------
+// ------------------------- 전역 상수 -------------------------
 constexpr int    UPDATE_MS = 100;     // 얼굴 검출 주기 (ms 단위)
 constexpr double EAR_THRESH = 0.30; // EAR 임계값
 constexpr double BLINK_RATIO_THRESH = 0.6; // 감은 비율 임계값
 constexpr int BLINK_WINDOW_MS = 2000; // 분석 시간 윈도우 (2초)
-// -------------------------------
+// -------------------------------------------------------------
 
-// 얼굴 검출용 백그라운드 스레드 함수 선언
-void runFaceDetectionThread(
-  std::atomic<bool>& running,
-  cv::Mat& sharedFrame,
-  std::mutex& frameMutex,
-  dlib::rectangle& biggestFaceRect,
-  bool& hasFace,
-  std::mutex& faceMutex
-);
-
-// ---------------------------- main ----------------------------
 int main() {
+  // 카메라 열기
   cv::VideoCapture cap(0, cv::CAP_V4L2);
   if (!cap.isOpened()) {
     std::cerr << "카메라 열기 실패!\n";
     return -1;
   }
 
-  // dlib 초기화
+  // dlib 모델 불러오기
   dlib::shape_predictor sp;
   dlib::deserialize("../eye_data/shape_predictor_68_face_landmarks.dat") >> sp;
 
-  // -------- 공유 변수 ---------
-  dlib::rectangle biggestFaceRect;
-  bool hasFace = false;
-  std::mutex faceMutex;
+  // "Window" 창 생성. (이후 cv::imshow("Window", frame) 하면 여기에 출력된다)
+  cv::namedWindow("Frame");
 
-  cv::Mat sharedFrame;
-  std::mutex frameMutex;
+  // 쓰레드와의 공유 변수
+  dlib::rectangle biggestFaceRect; // 가장 큰 얼굴 사각형
+  bool hasFace = false; // 얼굴 감지 여부
+  std::mutex faceMutex; // 위 두 변수 동기화 뮤텍스
+  cv::Mat sharedFrame; // 쓰레드에게 전달할 프레임
+  std::mutex frameMutex; // 위 변수 동기화 뮤텍스
+  std::atomic<bool> running = true; // 프로그램 동작 여부 변수 (쓰레드 제어용)
 
-  std::atomic<bool> running = true;
-  // -----------------------------
-
-  // 백그라운드 얼굴 탐지 스레드 시작
-  std::thread faceThread(runFaceDetectionThread,
-    std::ref(running),
-    std::ref(sharedFrame),
-    std::ref(frameMutex),
-    std::ref(biggestFaceRect),
-    std::ref(hasFace),
-    std::ref(faceMutex)
-  );
-  // --------------------------------
-
-  cv::namedWindow("Window");
-  unsigned int frameCount = 0;
-
-  // 눈 감음 정보
+  // 눈 감음 정보 저장 변수
   std::deque<std::pair<std::chrono::steady_clock::time_point, bool>> blinkHistory;
   unsigned long long closedCount = 0;
 
+  // 얼굴 탐지 스레드 시작
+  std::thread faceThread(runFaceDetectionThread, std::ref(running), std::ref(sharedFrame), std::ref(frameMutex), std::ref(biggestFaceRect), std::ref(hasFace), std::ref(faceMutex));
+
   while (true) {
+    // FPS 계산 위한 시간값 저장
     auto t0 = std::chrono::high_resolution_clock::now();
 
-    cv::Mat frame;
-    cap >> frame;
+    // 카메라로부터 한 프레임 받아옴
+    cv::Mat frame; cap >> frame;
     if (frame.empty()) break;
 
-    // 최신 프레임 공유
+    // 얼굴 영역 계산 쓰레드와 최신 프레임 공유
     {
       std::lock_guard<std::mutex> lock(frameMutex);
       frame.copyTo(sharedFrame);
@@ -92,35 +72,53 @@ int main() {
       faceRect = biggestFaceRect;
     }
 
+    // 얼굴 감지 성공시
     if (localHasFace) {
+      // 68개의 얼굴 랜드마크 추출
       dlib::cv_image<dlib::bgr_pixel> dlibFrame(frame);
       dlib::full_object_detection landmarks = sp(dlibFrame, faceRect);
-      double earL = computeEAR(landmarks, 36);
-      double earR = computeEAR(landmarks, 42);
-      double earAvg = (earL + earR) / 2.0;
 
-      // 얼굴 박스
+      // 얼굴 박스 표시
       cv::rectangle(frame,
         cv::Point(faceRect.left(), faceRect.top()),
         cv::Point(faceRect.right(), faceRect.bottom()),
         cv::Scalar(0, 255, 0), 2);
 
-      // 눈 랜드마크
+      // 눈 랜드마크 표시
       for (int i = 36; i <= 47; ++i) {
         dlib::point p = landmarks.part(i);
         cv::circle(frame, cv::Point(p.x(), p.y()), 2, cv::Scalar(255, 0, 0), -1);
       }
 
+      // 랜드마크 이용해서 EAR 계산
+      double earL = computeEAR(landmarks, 36);
+      double earR = computeEAR(landmarks, 42);
+      double earAvg = (earL + earR) / 2.0;
+
+      // 눈 감음 여부 확인
       bool isClosed = (earAvg < EAR_THRESH);
       if (isClosed) ++closedCount;
 
-      // 현재 시간 기록
+      // { 현재 시간, 눈 감음 여부} 기록
       auto now = std::chrono::steady_clock::now();
       blinkHistory.emplace_back(now, isClosed);
 
-      // 눈 감김 비율 계산
+      // 눈 감았을 시 경고 문구 출력
+      if (isClosed) {
+        cv::putText(frame, "Eye Closed!!!!",
+          cv::Point(faceRect.left(), faceRect.top() - 10),
+          cv::FONT_HERSHEY_SIMPLEX, 0.9,
+          cv::Scalar(0, 0, 255), 2);
+      }
+
+      // 2초간의 { 현재 시간, 눈 감음 여부 } Window 에서 눈 감김 비율 계산 && 화면에 출력
       double ratio = static_cast<double>(closedCount) / blinkHistory.size();
-      std::cout << "Eye closed ratio: " << ratio << std::endl;
+      std::ostringstream ratioOss;
+      ratioOss << "Eye Closed Ratio: " << std::fixed << std::setprecision(2) << ratio;
+      cv::putText(frame, ratioOss.str(), cv::Point(10, 60),
+        cv::FONT_HERSHEY_SIMPLEX, 0.8, cv::Scalar(0, 0, 255), 2);
+
+      // 눈 감김 비율이 임계치 넘을 시 경고
       if (ratio >= BLINK_RATIO_THRESH) {
         cv::putText(frame, "Eyes Closed TOO LONG!",
           cv::Point(faceRect.left(), faceRect.top() - 40),
@@ -128,78 +126,27 @@ int main() {
           cv::Scalar(0, 0, 255), 2);
       }
 
-      // 2초 윈도우 초과한 항목 제거
+      // 2초간의 윈도우 초과한 항목 제거
       while (!blinkHistory.empty() && std::chrono::duration_cast<std::chrono::milliseconds>(now - blinkHistory.front().first).count() > BLINK_WINDOW_MS) {
         if (blinkHistory.front().second) --closedCount;
         blinkHistory.pop_front();
       }
-
-      if (isClosed) {
-        cv::putText(frame, "Eye Closed!!!!",
-          cv::Point(faceRect.left(), faceRect.top() - 10),
-          cv::FONT_HERSHEY_SIMPLEX, 0.9,
-          cv::Scalar(0, 0, 255), 2);
-      }
     }
 
     // FPS 계산
-    double ms = std::chrono::duration<double, std::milli>(
-      std::chrono::high_resolution_clock::now() - t0).count();
+    double ms = std::chrono::duration<double, std::milli>(std::chrono::high_resolution_clock::now() - t0).count();
     double fps = (ms > 0.0) ? 1000.0 / ms : 0.0;
     std::ostringstream oss;
     oss << "FPS: " << std::fixed << std::setprecision(1) << fps;
     cv::putText(frame, oss.str(), cv::Point(10, 30),
       cv::FONT_HERSHEY_SIMPLEX, 0.8, cv::Scalar(255, 255, 255), 2);
 
-    cv::imshow("Window", frame);
+    cv::imshow("Frame", frame);
     if (cv::waitKey(1) == 27) break;
-    ++frameCount;
   }
 
   // 종료 처리
   running = false;
   faceThread.join();
   return 0;
-}
-
-void runFaceDetectionThread(
-  std::atomic<bool>& running,
-  cv::Mat& sharedFrame,
-  std::mutex& frameMutex,
-  dlib::rectangle& biggestFaceRect,
-  bool& hasFace,
-  std::mutex& faceMutex
-) {
-  dlib::frontal_face_detector detector = dlib::get_frontal_face_detector();
-  while (running) {
-    cv::Mat localFrame;
-    {
-      std::lock_guard<std::mutex> lock(frameMutex);
-      if (sharedFrame.empty()) continue;
-      sharedFrame.copyTo(localFrame);
-    }
-
-    dlib::cv_image<dlib::bgr_pixel> dlibFrame(localFrame);
-    std::vector<dlib::rectangle> faces = detector(dlibFrame);
-
-    {
-      std::lock_guard<std::mutex> lock(faceMutex);
-      if (faces.empty()) {
-        hasFace = false;
-      }
-      else if (faces.size() == 1) {
-        biggestFaceRect = faces[0];
-        hasFace = true;
-      }
-      else {
-        biggestFaceRect = *std::max_element(faces.begin(), faces.end(),
-          [](const dlib::rectangle& a, const dlib::rectangle& b) {
-            return a.area() < b.area();
-          });
-        hasFace = true;
-      }
-    }
-
-    // std::this_thread::sleep_for(std::chrono::milliseconds(UPDATE_MS));
-  }
 }
