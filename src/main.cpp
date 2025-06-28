@@ -28,7 +28,7 @@ int main() {
 
   // dlib 모델 불러오기
   dlib::shape_predictor sp;
-  dlib::deserialize("../eye_data/shape_predictor_68_face_landmarks.dat") >> sp;
+  dlib::deserialize("../model/shape_predictor_68_face_landmarks.dat") >> sp;
 
   // "Window" 창 생성. (이후 cv::imshow("Window", frame) 하면 여기에 출력된다)
   cv::namedWindow("Frame");

@@ -13,10 +13,10 @@ find_package(OpenCV REQUIRED)
 include_directories(${OpenCV_INCLUDE_DIRS})
 
 # Dlib
-include_directories(${CMAKE_SOURCE_DIR}/dlib)
+include_directories(${CMAKE_SOURCE_DIR}/include/dlib)
 add_library(dlib STATIC IMPORTED)
 set_target_properties(dlib PROPERTIES
-    IMPORTED_LOCATION ${CMAKE_SOURCE_DIR}/dlib/build/dlib/libdlib.a
+    IMPORTED_LOCATION ${CMAKE_SOURCE_DIR}/library/libdlib.a
 )
 
 # Main executable
