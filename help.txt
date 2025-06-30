@@ -32,3 +32,13 @@ cmake -DCMAKE_BUILD_TYPE=Release ..
 cmake --build .
 
 ******************************************************************************************************
+
+3. 얼굴 인식 딥러닝 모델
+
+https://github.com/keyurr2/face-detection
+
+위 링크에서 deploy.prototxt.txt 와 res10_300x300_ssd_iter_140000.caffemodel 파일 필요
+
+FPS 10 ~ 15 감소하므로 #define DNN 1 일 경우에 사용되도록 하였다.
+
+우선 기본값은 0으로 하고, 이후 차량에서의 테스트를 통해 잘 감지되지 않는다면 1로 하고 컴파일하자.
