@@ -12,7 +12,7 @@
 #include "functions.h"
 
 // ------------------------- 전역 상수 -------------------------
-constexpr double EAR_THRESH = 0.30; // EAR 임계값
+double EAR_THRESH = 0.30; // EAR 임계값
 constexpr double BLINK_RATIO_THRESH = 0.6; // 눈 감은 비율 임계값
 constexpr int BLINK_WINDOW_MS = 2000; // 분석 시간 윈도우 (2초)
 
@@ -24,6 +24,8 @@ constexpr int MAX_DOWN_COUNT = 5; // 몇번 카운트 해야 경고할 것인지
 // ------------------------- 전역 변수 -------------------------
 int downCount = 0; // 고개 떨어짐 횟수
 double prevNoseY = 1e50; // 이전 고개 좌표
+double earAvg = 0.0;
+std::vector<int> landmarkIdx = { 0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59 }; // 사용할 얼굴 랜드마크
 // -------------------------------------------------------------
 
 int main() {
@@ -52,10 +54,13 @@ int main() {
   // 눈 감음 정보 저장 변수
   std::deque<std::pair<std::chrono::steady_clock::time_point, bool>> blinkHistory;
   unsigned long long closedCount = 0;
-  double eyeClosedRatio = 0.0;
+  double eyeClosedRatio = 0.0; // BLINK_WINDOW_MS 중에 눈 감은 비율
 
   // 얼굴 탐지 스레드 시작
-  std::thread faceThread(runFaceDetectionThread, std::ref(running), std::ref(sharedFrame), std::ref(frameMutex), std::ref(biggestFaceRect), std::ref(hasFace), std::ref(faceMutex));
+  dlib::frontal_face_detector detector = dlib::get_frontal_face_detector();
+  std::thread faceThread(runFaceDetectionThread, std::ref(running), std::ref(detector), std::ref(sharedFrame), std::ref(frameMutex), std::ref(biggestFaceRect), std::ref(hasFace), std::ref(faceMutex));
+
+  EAR_THRESH = calibrateEARThreshold(cap, detector, sp);
 
   while (true) {
     // FPS 계산 위한 시간값 저장
@@ -93,15 +98,15 @@ int main() {
         cv::Scalar(0, 255, 0), 2);
 
       // 얼굴 랜드마크 표시
-      for (int i = 0; i < 68; ++i) {
-        dlib::point p = landmarks.part(i);
+      for (int i = 0; i < landmarkIdx.size(); ++i) {
+        dlib::point p = landmarks.part(landmarkIdx[i]);
         cv::circle(frame, cv::Point(p.x(), p.y()), 2, cv::Scalar(255, 0, 0), -1);
       }
 
       // 랜드마크 이용해서 EAR 계산
       double earL = computeEAR(landmarks, 36);
       double earR = computeEAR(landmarks, 42);
-      double earAvg = (earL + earR) / 2.0;
+      earAvg = (computeEAR(landmarks, 36) + computeEAR(landmarks, 42)) / 2.0;
 
       // 고개 떨어짐 계산. 27 ~ 30 코 랜드마크 평균 y값을 계산하여 이전 프레임의 평균 y값과 비교
       double currentNose = 0.0;
@@ -145,10 +150,15 @@ int main() {
       }
     }
 
+    // EAR 출력
+    std::ostringstream earOss;
+    earOss << "Eye Aspect Ratio: " << std::fixed << std::setprecision(2) << earAvg;
+    cv::putText(frame, earOss.str(), cv::Point(10, 60), cv::FONT_HERSHEY_SIMPLEX, 0.8, cv::Scalar(0, 0, 255), 2);
+
     // 눈 감김 비율 출력
     std::ostringstream ratioOss;
     ratioOss << "Eye Closed Ratio: " << std::fixed << std::setprecision(2) << eyeClosedRatio;
-    cv::putText(frame, ratioOss.str(), cv::Point(10, 60), cv::FONT_HERSHEY_SIMPLEX, 0.8, cv::Scalar(0, 0, 255), 2);
+    cv::putText(frame, ratioOss.str(), cv::Point(10, 90), cv::FONT_HERSHEY_SIMPLEX, 0.8, cv::Scalar(0, 0, 255), 2);
 
     // 눈 감김 비율이 임계치 넘을 시 경고
     if (eyeClosedRatio >= BLINK_RATIO_THRESH) {
