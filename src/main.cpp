@@ -18,12 +18,12 @@ constexpr int BLINK_WINDOW_MS = 2000; // 분석 시간 윈도우 (2초)
 
 constexpr double INCREASE_THRESH = 2.0; // 고개 움직임 감지 최소 값
 constexpr double INCREASE_THRESH2 = 0.1; // 고개 움직임 미감지 최대 값 (이 값보다 적게 아래로 내려가면 떨어짐 아님)
+constexpr double INCREASE_TIME = 0.3; // 고개 움직임 감지 최대 시간 값
 constexpr int MAX_DOWN_COUNT = 5; // 몇번 카운트 해야 경고할 것인지
 // -------------------------------------------------------------
 
 // ------------------------- 전역 변수 -------------------------
 int downCount = 0; // 고개 떨어짐 횟수
-double prevNoseY = 1e50; // 이전 고개 좌표
 double earAvg = 0.0;
 std::vector<int> landmarkIdx = { 0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59 }; // 사용할 얼굴 랜드마크
 // -------------------------------------------------------------
@@ -109,6 +109,7 @@ int main() {
       earAvg = (computeEAR(landmarks, 36) + computeEAR(landmarks, 42)) / 2.0;
 
       // 고개 떨어짐 계산. 27 ~ 30 코 랜드마크 평균 y값을 계산하여 이전 프레임의 평균 y값과 비교
+      static double prevNoseY = 1e50; // 이전 고개 좌표
       double currentNose = 0.0;
       for (int i = 27; i <= 30; ++i) {
         currentNose += landmarks.part(30).y();
@@ -117,7 +118,11 @@ int main() {
 
       // 이전 좌표와 비교해서 INCREASE_THRESH 보다 크게 증가하면 downCount 증가
       double diff = currentNose - prevNoseY;
-      if (diff >= INCREASE_THRESH) {
+      static auto prevTime = std::chrono::steady_clock::now();
+      auto currTime = std::chrono::steady_clock::now();
+      double deltaTimeSec = std::chrono::duration_cast<std::chrono::milliseconds>(currTime - prevTime).count() / 1000.0;
+
+      if (diff >= INCREASE_THRESH && deltaTimeSec < INCREASE_TIME) {
         ++downCount;
       }
       // 이전 좌표와 비교해서 INCREASE_THRESH 보다 작게 증가하면 downCount 0 으로 초기화
@@ -125,6 +130,7 @@ int main() {
         downCount = 0;
       }
       prevNoseY = currentNose;
+      prevTime = currTime;
 
       // 눈 감음 여부 계산. 감았을 시 closedCount 증가 및 경고 문구 출력
       bool isClosed = (earAvg < EAR_THRESH);
